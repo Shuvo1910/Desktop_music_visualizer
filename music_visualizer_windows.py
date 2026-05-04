@@ -1,8 +1,8 @@
 """
 ╔══════════════════════════════════════════════════════════╗
 ║      AUDIO VISUALIZER — Windows                          ║
-║  • Headphone / USB / Bluetooth — সব detect করে          ║
-║  • Proper FFT bars — beat দিলে picture-এর মতো দেখায়     ║
+║  • Headphone / USB / Bluetooth — detect  all             ║
+║  • Proper FFT bars — beat picture                        ║
 ║  • Fast attack, slow release (punchy + smooth)           ║
 ║  • Transparent background, desktop-center-bottom         ║
 ║  • Right-click = EXIT                                    ║
@@ -41,18 +41,18 @@ WIN_WIDTH     = 620
 WIN_HEIGHT    = 110
 MARGIN_BOTTOM = 55
 
-BAR_W         = 3           # narrower bar width
-BAR_GAP       = 4           # slightly more gap for breathing room
+BAR_W         = 3           
+BAR_GAP       = 4          
 DOT_R         = 1.4
 BAR_COLOR     = "#FFFFFF"
-BG_COLOR      = "#000001"     # transparent mask color
+BG_COLOR      = "#000001"    
 
-CHUNK         = 4096          # FFT window — larger = better bass resolution
-SMOOTHING_UP  = 0.60          # attack  — fast rise on beat
-SMOOTHING_DN  = 0.18          # release — slow fall after beat
-MIN_FREQ_HZ   = 40            # ignore below (cuts DC rumble)
-MAX_FREQ_HZ   = 14000         # ignore above (cuts hiss)
-UPDATE_MS     = 14            # ~70 fps
+CHUNK         = 4096         
+SMOOTHING_UP  = 0.60         
+SMOOTHING_DN  = 0.18          
+MIN_FREQ_HZ   = 40           
+MAX_FREQ_HZ   = 14000         
+UPDATE_MS     = 14           
 # ──────────────────────────────────────────────────────────
 
 
@@ -65,7 +65,7 @@ def _make_gain_curve(n: int) -> np.ndarray:
     This prevents bass bars from all clipping at the same height.
     """
     x    = np.linspace(0.0, 1.0, n)
-    gain = 0.42 * np.exp(1.60 * x)   # bass≈0.42, mid≈1.0, treble≈2.2
+    gain = 0.42 * np.exp(1.60 * x)   
     return gain.astype(np.float32)
 
 
@@ -125,8 +125,6 @@ def pick_best_device(p: pyaudio.PyAudio, force_idx=None):
                 return lb
         print(f"[WARN] Device {force_idx} not in loopback list or has no loopback analogue; auto-selecting.")
 
-    # 2. Ask pyaudiowpatch for the exact loopback partner of the
-    # current default WASAPI output device index.
     try:
         default_idx = get_default_output_idx(p)
         if default_idx is not None:
@@ -134,14 +132,11 @@ def pick_best_device(p: pyaudio.PyAudio, force_idx=None):
     except Exception:
         pass
 
-    # 3. Secondary exact lookup for the current default speaker.
     try:
         return p.get_default_wasapi_loopback()
     except Exception:
         pass
 
-    # 4. Name-based fallback for devices whose loopback analogue
-    # is exposed under a slightly different label.
     try:
         default_out = p.get_default_wasapi_device(d_out=True)
         default_name = default_out["name"]
@@ -162,7 +157,6 @@ def pick_best_device(p: pyaudio.PyAudio, force_idx=None):
     except Exception:
         pass
 
-    # 5. Fallback
     return loopbacks[0]
 
 
@@ -181,7 +175,6 @@ class Visualizer:
         y  =  sh - WIN_HEIGHT - MARGIN_BOTTOM
         self.root.geometry(f"{WIN_WIDTH}x{WIN_HEIGHT}+{x}+{y}")
 
-        # Push window behind all apps (stays above desktop icons)
         self.root.update_idletasks()
         hwnd = ctypes.windll.user32.GetParent(self.root.winfo_id())
         HWND_BOTTOM    = 1
@@ -207,11 +200,9 @@ class Visualizer:
         self.running      = True
         self.force_device = force_device
 
-        # Per-bar smoothing — bass bars respond slower, treble faster
-        # This makes adjacent bars move at different speeds → natural variation
         x = np.linspace(0.0, 1.0, BARS)
-        self._sm_up = (0.35 + 0.45 * x).astype(np.float64)   # attack
-        self._sm_dn = (0.10 + 0.18 * x).astype(np.float64)   # release
+        self._sm_up = (0.35 + 0.45 * x).astype(np.float64)   
+        self._sm_dn = (0.10 + 0.18 * x).astype(np.float64)  
 
         threading.Thread(target=self._audio_loop, daemon=True).start()
         self.root.after(UPDATE_MS, self._draw)
@@ -243,7 +234,7 @@ class Visualizer:
             CHANNELS = max(1, int(device["maxInputChannels"]))
             bins     = _log_bins(BARS, CHUNK // 2, RATE)
             window   = np.hanning(CHUNK)
-            # Remember which output we started with
+
             active_default = get_default_output_idx(p)
 
             print(f"\n✓ Listening: {device['name']}")
@@ -282,11 +273,9 @@ class Visualizer:
                 else:
                     silence_since = None
 
-                # Windowed FFT → magnitude
                 spectrum = np.abs(np.fft.rfft(buf * window))[: CHUNK // 2]
                 spectrum /= CHUNK
 
-                # Log-spaced bins — peak+RMS mix for natural bar variation
                 vals = np.array([
                     0.6 * spectrum[s:e].max() + 0.4 * np.sqrt(np.mean(spectrum[s:e] ** 2))
                     for s, e in bins
@@ -296,17 +285,13 @@ class Visualizer:
                 vals = np.clip(vals * GAIN_CURVE * 900.0, 0.0, max_h)
                 self.targets = vals
 
-                # Poll the current default output every second so device
-                # switching is detected promptly while the app is running.
                 if self.force_device is None and now >= next_device_check:
                     next_device_check = now + 1.0
                     cur = get_default_output_idx(p)
                     if cur != active_default:
                         print(f"[INFO] Default output changed ({active_default}→{cur})")
-                        break   # exit inner loop → _audio_loop restarts stream
+                        break 
 
-                # Some device switches leave the old loopback stream open but
-                # permanently silent. If that lasts for a bit, force reconnect.
                 if self.force_device is None and silence_since is not None and now - silence_since >= 1.5:
                     print("[INFO] Loopback stream went silent; reconnecting.")
                     break
@@ -322,7 +307,6 @@ class Visualizer:
         if not self.running:
             return
 
-        # Per-bar asymmetric smoothing (bass slow, treble fast)
         diff          = self.targets - self.heights
         self.heights += np.where(diff > 0,
                                  diff * self._sm_up,
@@ -340,27 +324,27 @@ class Visualizer:
             cx = x + BAR_W / 2.0
 
             if h < 1.5:
-                # Silent → tiny dot
+ 
                 c.create_oval(
                     cx - DOT_R, cy - DOT_R,
                     cx + DOT_R, cy + DOT_R,
                     fill=BAR_COLOR, outline=""
                 )
             else:
-                r = BAR_W / 2.0  # radius = half bar width → full semicircle
-                # Body (rectangle between the two round caps)
+                r = BAR_W / 2.0 
+
                 c.create_rectangle(
                     x, cy - h + r,
                     x + BAR_W, cy + h - r,
                     fill=BAR_COLOR, outline=""
                 )
-                # Top rounded cap
+
                 c.create_oval(
                     x, cy - h - r,
                     x + BAR_W, cy - h + r,
                     fill=BAR_COLOR, outline=""
                 )
-                # Bottom rounded cap
+    
                 c.create_oval(
                     x, cy + h - r,
                     x + BAR_W, cy + h + r,
